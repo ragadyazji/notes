@@ -33,3 +33,16 @@ func Test_addNew(t *testing.T) {
 		t.Error("add didn't add any notes")
 	}
 }
+
+func Test_addNew_exit_editor(t *testing.T) {
+	notes := make(map[string]string)
+	output := TestReaderWriter{}
+	noteTitle := "note1"
+	input := TestReaderWriter{
+		inner: []byte(fmt.Sprintf("%s\n", noteTitle)),
+	}
+	addNew(&output, &input, notes, "cat")
+	if len(notes) != 1 {
+		t.Error("add didn't add any notes")
+	}
+}

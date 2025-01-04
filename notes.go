@@ -23,12 +23,12 @@ func show(w io.Writer, notes NoteList) {
 		fmt.Println("No notes yet")
 		return
 	}
-	for key := range notes {
-		fmt.Println(key)
+	for key, value := range notes {
+		fmt.Printf("%s: %v\n", key, len(value))
 	}
-	//fmt.Println(notes)
 }
-func FileChanged(initialStat os.FileInfo, file *os.File) {
+
+func FileChanged(initialStat os.FileInfo, file *os.File, c chan<- bool) {
 	for {
 		stat, err := file.Stat()
 		if err != nil {
@@ -36,128 +36,126 @@ func FileChanged(initialStat os.FileInfo, file *os.File) {
 		}
 
 		if stat.Size() != initialStat.Size() || stat.ModTime() != initialStat.ModTime() {
-			break
+			c <- true
 		}
 
-		time.Sleep(1 * time.Second)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
-const EDITOR_FILENAME = "RAGADSFILE"
+func ProgramClosed(c chan<- bool, command *exec.Cmd) {
+	command.Wait()
+	// Wait for program termination signal
+	c <- true
+}
 
-func addNew(w io.Writer, r io.Reader, notes NoteList, editorCommand string) {
+const EDITOR_FILENAME = "./RAGADSFILE"
+
+func addNew(w io.Writer, r io.Reader, notes NoteList, editorCommand string, editorArgs ...string) {
 	//print request for input for title
 	reader := bufio.NewReader(r)
-	fmt.Print("Enter note title: ")
+	fmt.Fprintln(w, "Enter note title: ")
 	// read input and store in variable for title
 	input, _ := reader.ReadString('\n')
 	noteTitle := strings.TrimSpace(input)
 
 	//make a temp file
-	file, err := os.CreateTemp(os.TempDir(), EDITOR_FILENAME)
+	file, err := os.Create(EDITOR_FILENAME)
 	if err != nil {
 		log.Fatal(err)
 	}
-	// defer delete the file
+	if err := file.Sync(); err != nil {
+		log.Fatal(err)
+	}
 
 	//print request for input for text
-	fmt.Println("Enter lines of text:")
-	ctx, _ := context.WithCancel(context.Background())
+	fmt.Fprintln(w, "Enter lines of text:")
+	contents, err := editFile(file, editorCommand, editorArgs)
+	if err != nil {
+		log.Fatal(err)
+	}
+	notes[noteTitle] = contents
+}
+
+// edits a temp file with the given editor and returns the contents or an error
+func editFile(file *os.File, editorCommand string, editorArgs []string) (string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// spawn a editor for the file
-	cmd := exec.CommandContext(ctx, editorCommand, file.Name())
+	cmd := exec.CommandContext(ctx, editorCommand, append(editorArgs, file.Name())...)
 	// watch the file for edits
-	// initialStat, err := file.Stat()
-	// if err != nil {
-	// 	return
-	// }
-	// go FileChanged(initialStat, file)
+	initialStat, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
 
 	cmd.Start()
 
-	cmd.Wait()
+	c := make(chan bool)
+	go FileChanged(initialStat, file, c)
+	go ProgramClosed(c, cmd)
+
+	<-c
 
 	// when saved copy the contents to the storage at the `title`
-	var contents []byte
-	_, err = file.Read(contents)
+	contents, err := os.ReadFile(file.Name())
 	if err != nil {
-		return
+		return "", err
 	}
-
-	notes[noteTitle] = string(contents)
-
-	//go ProgramClosed()
 
 	// clear the contents of the temp file (or destroy it)
-	// close the spawned program
-}
-func add(w io.Writer, r io.Reader, notes NoteList) {
-	// reader := bufio.NewReader(os.Stdin)
-	// fmt.Print("Enter a title for the note: ")
-	// title, _ := reader.ReadString('\n')
-	// title = title[:len(title)-1]
-
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Enter file name: ")
-	fileName, _ := reader.ReadString('\n')
-	fileName = fileName[:len(fileName)-1] // Remove trailing newline
-
-	// Create the file
-	file, err := os.Create(fileName)
+	err = os.Remove(file.Name())
 	if err != nil {
-		fmt.Println("Error creating file:", err)
-		return
+		return "", err
 	}
-	defer file.Close()
-
-	// Get multiline input from user
-	fmt.Println("Enter lines of text (empty line to finish):")
-	var lines []string
-	for {
-		line, _ := reader.ReadString('\n')
-		line = line[:len(line)-1] // Remove trailing newline
-
-		if line == "" {
-			break
-		}
-		lines = append(lines, line)
-	}
-
-	// Write lines to file
-	for _, line := range lines {
-		_, err = file.WriteString(line + "\n")
-		if err != nil {
-			fmt.Println("Error writing to file:", err)
-			return
-		}
-	}
-
-	// Create map with title as key and multiline text as value
-	//textMap := make(map[string]string)
-	notes[fileName] = ""
-	for _, line := range lines {
-		notes[fileName] += line + "\n"
-	}
-	show(w, notes)
+	// TODO: close the spawned program
+	return string(contents), nil
 }
 
-// func deleteFileName() {
-// 	show()
-// 	reader := bufio.NewReader(os.Stdin)
-// 	fmt.Print("Enter the file name of the note you want to delete: ")
-// 	input, _ := reader.ReadString('\n')
-// 	// _, err := strconv.Atoi(input)
-// 	// if err != nil {
-// 	// 	fmt.Println("Error:", err)
-// 	// 	return
-// 	// }
+func deleteFileName(w io.Writer, r io.Reader, notes NoteList) {
+	show(os.Stdout, notes)
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Enter the file name of the note you want to delete: ")
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+	delete(notes, input)
+	// _, err := strconv.Atoi(input)
+	// if err != nil {
+	// 	fmt.Println("Error:", err)
+	// 	return
+	// }
+	show(os.Stdout, notes)
+}
 
-// 	delete(notes, input)
-// 	show()
-// }
+func edit(w io.Writer, r io.Reader, notes NoteList, editorCommand string, editorArgs ...string) {
+	show(os.Stdout, notes)
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Enter the file name of the note you want to edit: ")
+	input, _ := reader.ReadString('\n')
+	noteTitle := strings.TrimSpace(input)
+	value, ok := notes[noteTitle]
+	if ok {
+		//make a temp file
+		file, err := os.Create(EDITOR_FILENAME)
+		if err != nil {
+			log.Fatal(err)
+		}
+		_, err = file.WriteString(value)
+		if err != nil {
+			log.Fatal(err)
+		}
+		contents, err := editFile(file, editorCommand, editorArgs)
+		if err != nil {
+			log.Fatal(err)
+		}
+		notes[noteTitle] = contents
+	} else {
+		fmt.Println("Note not found")
+	}
+}
 
-// func edit() {
-
-// }
+const DEFAULT_EDITOR = "code"
+const DEFAULT_ARG = "--wait"
 
 func main() {
 	notes := make(map[string]string)
@@ -171,15 +169,16 @@ func main() {
 			show(os.Stdout, notes)
 		case 2:
 			fmt.Println("You want to add a note")
-			// add()
+			addNew(os.Stdin, os.Stdout, notes, DEFAULT_EDITOR, DEFAULT_ARG)
 		// 	// if err := add(); err != nil {
 		// 	// 	fmt.Println("Error:", err)
 		// 	// }
 		case 3:
 			fmt.Println("You want to delete a note")
-			// deleteFileName()
-		// case 4:
-		// 	fmt.Println("You want edit a note")
+			deleteFileName(os.Stdin, os.Stdout, notes)
+		case 4:
+			fmt.Println("You want edit a note")
+			edit(os.Stdin, os.Stdout, notes, DEFAULT_EDITOR, DEFAULT_ARG)
 		default:
 			fmt.Println("Choose between 1-4")
 		}
