@@ -146,10 +146,34 @@ func edit(w io.Writer, r io.Reader, notes NoteList, editorCommand string, editor
 }
 
 const DEFAULT_EDITOR = "code"
-const DEFAULT_ARG = "--wait"
+const DEFAULT_EDITOR_ARGS = "--wait"
+
+const EDITOR_ENV_VAR = "EDITOR"
+const EDITOR_ARGS_ENV_VAR = "EDITOR_ARGS"
+
+func getVarOrDefault(envVar, defaultValue string) string {
+	value, set := os.LookupEnv(envVar)
+	value = strings.TrimSpace(value)
+	if value == "" || !set {
+		value = defaultValue
+	}
+	return value
+}
+
+func getEditor() string {
+	return getVarOrDefault(EDITOR_ENV_VAR, DEFAULT_EDITOR)
+}
+
+func getEditorArgs() []string {
+	args := getVarOrDefault(EDITOR_ARGS_ENV_VAR, DEFAULT_EDITOR_ARGS)
+	splitArgs := strings.Split(args, " ")
+	return splitArgs
+}
 
 func main() {
 	notes := make(map[string]string)
+	editor := getEditor()
+	editorArgs := getEditorArgs()
 	for {
 		var i int
 		fmt.Println("select an option by the number: \n1. show all notes \n2. add a note\n3. delete a note \n4. edit  a note")
@@ -160,13 +184,13 @@ func main() {
 			show(os.Stdout, notes)
 		case 2:
 			fmt.Println("You want to add a note")
-			addNew(os.Stdin, os.Stdout, notes, DEFAULT_EDITOR, DEFAULT_ARG)
+			addNew(os.Stdin, os.Stdout, notes, editor, editorArgs...)
 		case 3:
 			fmt.Println("You want to delete a note")
 			deleteFileName(os.Stdin, os.Stdout, notes)
 		case 4:
 			fmt.Println("You want edit a note")
-			edit(os.Stdin, os.Stdout, notes, DEFAULT_EDITOR, DEFAULT_ARG)
+			edit(os.Stdin, os.Stdout, notes, editor, editorArgs...)
 		default:
 			fmt.Println("Choose between 1-4")
 		}

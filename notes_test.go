@@ -1,9 +1,8 @@
 package main
 
 import (
-	//"bytes"
-	//"io"
 	"fmt"
+	"os"
 	"testing"
 )
 
@@ -117,5 +116,31 @@ func Test_edit_ChangedLength(t *testing.T) {
 	expectedValue := "note123\n"
 	if newValue != expectedValue {
 		t.Errorf("new value wrong, expected: %q, got: %q", expectedValue, newValue)
+	}
+}
+
+// check what happens when the env var is not set
+func Test_getEditor_unset(t *testing.T) {
+	os.Unsetenv(EDITOR_ENV_VAR)
+	editor := getEditor()
+	if editor != DEFAULT_EDITOR {
+		t.Error("if empty, editor should be default")
+	}
+}
+
+func Test_getEditor_empty_string(t *testing.T) {
+	os.Setenv(EDITOR_ENV_VAR, " ")
+	editor := getEditor()
+	if editor != DEFAULT_EDITOR {
+		t.Error("if empty, editor should be default")
+	}
+}
+
+func Test_getEditor_kkfj(t *testing.T) {
+	expectedValue := "iosjdi"
+	os.Setenv(EDITOR_ENV_VAR, expectedValue)
+	editor := getEditor()
+	if editor != expectedValue {
+		t.Errorf("expected: %q, got %q", expectedValue, editor)
 	}
 }
